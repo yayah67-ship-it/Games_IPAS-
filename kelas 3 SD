@@ -1,0 +1,1016 @@
+import React, { useState, useEffect, useRef } from 'react';
+import { initializeApp } from 'firebase/app';
+import { 
+  getFirestore, 
+  collection, 
+  addDoc, 
+  onSnapshot, 
+  serverTimestamp 
+} from 'firebase/firestore';
+import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from 'firebase/auth';
+import { 
+  Volume2, VolumeX, Sparkles, Award, Play, CheckCircle2, 
+  XCircle, Download, Trophy, RefreshCw, Users, BookOpen, 
+  ChevronRight, ArrowLeft, Lightbulb, Music, HelpCircle
+} from 'lucide-react';
+
+// --- FIREBASE INITIALIZATION ---
+const firebaseConfigStr = typeof __firebase_config !== 'undefined' ? __firebase_config : '{}';
+let firebaseConfig = {};
+try {
+  firebaseConfig = JSON.parse(firebaseConfigStr);
+} catch (e) {
+  console.warn("Firebase config parsing error, fallback to demo mode:", e);
+}
+
+const app = initializeApp(firebaseConfig);
+const auth = getAuth(app);
+const db = getFirestore(app);
+const appId = typeof __app_id !== 'undefined' ? __app_id : 'ipas-kuis-sd3';
+
+// --- BANK SOAL (20 SOAL IPAS KELAS 3: PERUBAHAN WUJUD BENDA) ---
+const QUESTION_BANK = [
+  {
+    id: 1,
+    type: 'choice',
+    level: 1,
+    question: "Es batu yang didiamkan di ruang terbuka lama-kelamaan akan menjadi air. Perubahan wujud ini disebut...",
+    audioPrompt: "Es batu yang didiamkan di ruang terbuka lama kelamaan akan menjadi air. Perubahan wujud ini disebut apa?",
+    options: ["Mencair", "Membeku", "Menguap", "Mengembun"],
+    answer: "Mencair",
+    explanation: "Mencair adalah perubahan wujud benda padat menjadi cair karena menerima panas."
+  },
+  {
+    id: 2,
+    type: 'choice',
+    level: 1,
+    question: "Ibu memasukkan air ke dalam freezer kulkas. Setelah beberapa jam, air berubah menjadi es. Peristiwa ini dinamakan...",
+    audioPrompt: "Ibu memasukkan air ke dalam freezer kulkas. Setelah beberapa jam, air berubah menjadi es. Peristiwa ini dinamakan...",
+    options: ["Mencair", "Membeku", "Menguap", "Menyublim"],
+    answer: "Membeku",
+    explanation: "Membeku terjadi ketika benda cair melepaskan kalor/dingin sehingga berubah menjadi padat."
+  },
+  {
+    id: 3,
+    type: 'audio_choice',
+    level: 1,
+    question: "Dengarkan petunjuk suara! Apa manfaat dari proses menjemur pakaian di bawah terik matahari?",
+    audioPrompt: "Saat menjemur baju basah di bawah sinar matahari, air di baju berubah menjadi uap air sehingga baju jadi kering. Manfaat ini menggunakan proses apa?",
+    options: ["Menguap", "Mencair", "Membeku", "Mengembun"],
+    answer: "Menguap",
+    explanation: "Menguap adalah perubahan cair menjadi gas. Manfaatnya untuk mengeringkan pakaian, kerupuk, dan pembuatan garam."
+  },
+  {
+    id: 4,
+    type: 'choice',
+    level: 1,
+    question: "Pada pagi hari, terdapat bintik-bintik air di permukaan daun padahal malamnya tidak hujan. Peristiwa ini disebut...",
+    audioPrompt: "Pada pagi hari, terdapat bintik-bintik air di permukaan daun padahal malam tidak hujan. Peristiwa ini disebut...",
+    options: ["Mengembun", "Menguap", "Menyublim", "Mencair"],
+    answer: "Mengembun",
+    explanation: "Mengembun adalah perubahan gas (udara lembap) menjadi titik-titik air karena udara dingin malam hari."
+  },
+  {
+    id: 5,
+    type: 'short_text',
+    level: 1,
+    question: "Kapur barus yang diletakkan di dalam lemari baju lama-kelamaan akan mengecil dan habis. Proses perubahan wujud padat menjadi gas ini disebut...",
+    audioPrompt: "Kapur barus di dalam lemari lama-kelamaan mengecil dan habis. Ketikkan nama proses dari padat menjadi gas!",
+    answerKeywords: ["menyublim", "sublim"],
+    correctDisplay: "Menyublim",
+    explanation: "Menyublim adalah perubahan wujud benda dari padat langsung menjadi gas."
+  },
+  {
+    id: 6,
+    type: 'choice',
+    level: 2,
+    question: "Saat Ibu memasak menggunakan mentega di atas wajan panas, mentega padat akan meleleh. Manfaat perubahan wujud ini adalah...",
+    audioPrompt: "Saat Ibu memasak mentega di atas wajan panas, mentega mentega padat akan meleleh. Manfaat perubahan wujud mencair ini adalah...",
+    options: [
+      "Memudahkan melumasi bahan makanan saat menumis",
+      "Membuat wajan menjadi dingin",
+      "Mengubah mentega jadi es",
+      "Membuat wajan berbau harum"
+    ],
+    answer: "Memudahkan melumasi bahan makanan saat menumis",
+    explanation: "Mentega mencair saat dipanaskan sehingga memudahkan kita meratakan minyak gurih saat memasak."
+  },
+  {
+    id: 7,
+    type: 'choice',
+    level: 2,
+    question: "Petani garam memanfaatkan sinar matahari untuk menguapkan air laut sehingga tersisa kristal garam. Proses perubahan wujud gas/uap menjadi kristal dinamakan...",
+    audioPrompt: "Proses pembentukan kristal garam dari uap/larutan disebut...",
+    options: ["Mengkristal", "Mencair", "Mengembun", "Membeku"],
+    answer: "Mengkristal",
+    explanation: "Mengkristal (mengkristalkan/mendeposisi) adalah perubahan wujud gas menjadi padat."
+  },
+  {
+    id: 8,
+    type: 'audio_choice',
+    level: 2,
+    question: "Dengarkan audio berikut! Alat atau benda apa yang memanfaatkan perubahan wujud menyublim di rumah?",
+    audioPrompt: "Benda di rumah apa yang memanfaatkan peristiwa menyublim untuk mengharumkan ruangan atau lemari?",
+    options: ["Kamper / Pengharum Lemari", "Es Batu Kulkas", "Air Minum Gelas", "Minyak Goreng"],
+    answer: "Kamper / Pengharum Lemari",
+    explanation: "Kamper/kapur barus memanfaatkan proses menyublim untuk menyebarkan wangi ke seluruh ruangan/lemari."
+  },
+  {
+    id: 9,
+    type: 'choice',
+    level: 2,
+    question: "Dinding luar gelas yang berisi es teh menjadi basah dan dingin. Dari manakah asal titik air tersebut?",
+    audioPrompt: "Dinding luar gelas yang berisi es teh menjadi basah. Dari manakah asal titik air tersebut?",
+    options: [
+      "Uap air di udara sekitar gelas yang mengembun",
+      "Es di dalam gelas yang bocor keluar",
+      "Air teh yang meresap lewat kaca",
+      "Sinar matahari yang mencairkan gelas"
+    ],
+    answer: "Uap air di udara sekitar gelas yang mengembun",
+    explanation: "Udara di sekitar gelas mendingin karena es, lalu uap air di udara berubah menjadi bintik air (mengembun)."
+  },
+  {
+    id: 10,
+    type: 'short_text',
+    level: 2,
+    question: "Proses pembuatan es krim yang lezat memanfaatkan perubahan wujud dari cair menjadi padat yang disebut...",
+    audioPrompt: "Proses pembuatan es krim dari adonan cair menjadi es padat disebut...",
+    answerKeywords: ["membeku", "pembekuan"],
+    correctDisplay: "Membeku",
+    explanation: "Membeku digunakan dalam industri kuliner untuk membuat es krim, agar-agar, dan es batu."
+  },
+  {
+    id: 11,
+    type: 'choice',
+    level: 3,
+    question: "Apa yang akan terjadi jika air laut tidak bisa menguap saat terkena panas matahari?",
+    audioPrompt: "Apa yang akan terjadi jika air laut tidak bisa menguap saat terkena panas matahari?",
+    options: [
+      "Hujan tidak akan terjadi dan petani garam gagal panen",
+      "Air laut akan langsung membeku",
+      "Ikan di laut akan cepat bertambah banyak",
+      "Gunung es akan mencair cepat"
+    ],
+    answer: "Hujan tidak mebawa air dan petani garam gagal panen",
+    explanation: "Penguapan air laut penting untuk daur air (pembentukan awan hujan) dan pembuatan garam."
+  },
+  {
+    id: 12,
+    type: 'choice',
+    level: 3,
+    question: "Mengapa lilin yang dibakar lama-lama menetes dan menjadi pendek, lalu tetesannya keras kembali?",
+    audioPrompt: "Mengapa lilin yang dibakar menetes lalu keras kembali?",
+    options: [
+      "Lilin mencair karena panas sumbu, lalu membeku lagi saat dingin",
+      "Lilin menguap menjadi udara",
+      "Lilin menyublim lalu mengembun",
+      "Lilin menghilang dimakan api"
+    ],
+    answer: "Lilin mencair karena panas sumbu, lalu membeku lagi saat dingin",
+    explanation: "Panas api mencairkan batang lilin. Saat tetesan menjauh dari api, suhunya turun dan lilin membeku kembali."
+  },
+  {
+    id: 13,
+    type: 'audio_choice',
+    level: 3,
+    question: "Dengarkan skenario ini! Manakah teknologi/kegiatan berikut yang TIDAK memanfaatkan perubahan wujud menguap?",
+    audioPrompt: "Dengarkan baik-baik. Dari pilihan berikut, manakah kegiatan yang tidak menggunakan prinsip penguapan?",
+    options: ["Membuat Es Mambo", "Pengeringan Ikan Asin", "Pembuatan Garam Dapur", "Menjemur Pakaian Basah"],
+    answer: "Membuat Es Mambo",
+    explanation: "Membuat es mambo memanfaatkan proses MEMBEKU, bukan menguap."
+  },
+  {
+    id: 14,
+    type: 'short_text',
+    level: 3,
+    question: "Salju terbentuk di awan ketika uap air yang sangat dingin langsung berubah menjadi kristal es padat. Peristiwa ini disebut...",
+    audioPrompt: "Uap air langsung jadi kristal salju disebut...",
+    answerKeywords: ["mengkristal", "kristal", "deposisi"],
+    correctDisplay: "Mengkristal",
+    explanation: "Mengkristal/deposisi terjadi di atmosfer dingin sehingga terbentuk butiran salju."
+  },
+  {
+    id: 15,
+    type: 'choice',
+    level: 3,
+    question: "Mengapa saat memasak air, Ibu menutup panci agar air lebih cepat mendidih dan uap air tidak cepat habis?",
+    audioPrompt: "Mengapa panci ditutup saat memasak air?",
+    options: [
+      "Menahan uap air dan panas agar terperangkap di dalam panci",
+      "Agar air tidak berubah warna",
+      "Supaya air di dalam panci membeku",
+      "Agar panci tidak menjadi panas"
+    ],
+    answer: "Menahan uap air dan panas agar terperangkap di dalam panci",
+    explanation: "Tutup panci menahan panas uap air sehingga suhu di dalam panci tetap tinggi dan efisien."
+  },
+  {
+    id: 16,
+    type: 'choice',
+    level: 3,
+    question: "Perubahan wujud dari gas menjadi cair dinamakan...",
+    audioPrompt: "Perubahan wujud dari gas menjadi cair dinamakan?",
+    options: ["Mengembun", "Mencair", "Menguap", "Menyublim"],
+    answer: "Mengembun",
+    explanation: "Mengembun mengubah wujud gas menjadi cairan."
+  },
+  {
+    id: 17,
+    type: 'short_text',
+    level: 3,
+    question: "Pencetakan perhiasan emas dilakukan dengan memanaskan logam padat hingga menjadi cairan, lalu dituang ke cetakan. Perubahan wujud saat dipanaskan ini disebut...",
+    audioPrompt: "Logam dipanaskan sampai jadi cairan disebut...",
+    answerKeywords: ["mencair", "pelelehan", "peleburan"],
+    correctDisplay: "Mencair",
+    explanation: "Logam dipanaskan pada suhu sangat tinggi hingga mencair agar mudah dicetak."
+  },
+  {
+    id: 18,
+    type: 'choice',
+    level: 2,
+    question: "Benda padat memiliki sifat bentuk yang tetap. Namun saat es dicairkan, wujudnya menjadi air cair yang sifatnya...",
+    audioPrompt: "Air cair memiliki sifat wujud seperti apa?",
+    options: [
+      "Bentuknya mengikuti wadah/tempatnya",
+      "Bentuknya tetap keras seperti kayu",
+      "Bisa melayang di udara",
+      "Selalu mempunyai warna hitam"
+    ],
+    answer: "Bentuknya mengikuti wadah/tempatnya",
+    explanation: "Benda cair menyesuaikan bentuknya dengan wadah yang ditempatinya."
+  },
+  {
+    id: 19,
+    type: 'choice',
+    level: 2,
+    question: "Apa faktor utama yang menyebabkan es batu mencair dan air mendidih menguap?",
+    audioPrompt: "Apa faktor utama yang menyebabkan es mencair dan air menguap?",
+    options: [
+      "Peningkatan suhu / penerimaan panas (kalor)",
+      "Pendinginan yang ekstrem",
+      "Tiupan angin kencang saja",
+      "Ruangan yang gelap gulita"
+    ],
+    answer: "Peningkatan suhu / penerimaan panas (kalor)",
+    explanation: "Panas (kalor) membuat partikel benda bergerak lebih bebas sehingga terjadi pencairan dan penguapan."
+  },
+  {
+    id: 20,
+    type: 'short_text',
+    level: 1,
+    question: "Agar-agar yang dimasak mulanya berupa cairan panas, lalu didiamkan hingga dingin menjadi kenyal dan padat. Proses ini adalah contoh peristiwa...",
+    audioPrompt: "Agar-agar cair mendingin menjadi padat. Peristiwa ini disebut...",
+    answerKeywords: ["membeku", "pembekuan"],
+    correctDisplay: "Membeku",
+    explanation: "Proses mendinginnya adonan agar-agar cair menjadi padat adalah contoh membeku."
+  }
+];
+
+export default function App() {
+  // --- STATE UTAMA ---
+  const [user, setUser] = useState(null);
+  const [studentInfo, setStudentInfo] = useState({ name: '', class: '3A' });
+  const [gameState, setGameState] = useState('welcome'); // welcome, playing, result, teacher_dashboard
+  const [soundEnabled, setSoundEnabled] = useState(true);
+  const [ttsEnabled, setTtsEnabled] = useState(true);
+
+  // Kuis State
+  const [currentQIndex, setCurrentQIndex] = useState(0);
+  const [score, setScore] = useState(0);
+  const [answersHistory, setAnswersHistory] = useState([]);
+  const [userShortAnswer, setUserShortAnswer] = useState('');
+  const [selectedOption, setSelectedOption] = useState(null);
+  const [showFeedback, setShowFeedback] = useState(false);
+  const [isCorrect, setIsCorrect] = useState(false);
+  const [adaptiveLevel, setAdaptiveLevel] = useState(1); // 1: Mudah, 2: Sedang, 3: Sulit
+
+  // Guru Dashboard State
+  const [teacherPass, setTeacherPass] = useState('');
+  const [isTeacherAuthed, setIsTeacherAuthed] = useState(false);
+  const [studentResults, setStudentResults] = useState([]);
+  const [loadingDashboard, setLoadingDashboard] = useState(false);
+
+  // Audio Ref/Context
+  const synthRef = useRef(window.speechSynthesis || null);
+
+  // --- EFEK AUDIO & SOUND EFFECTS ---
+  const playSfx = (type) => {
+    if (!soundEnabled) return;
+    try {
+      const ctx = new (window.AudioContext || window.webkitAudioContext)();
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+
+      if (type === 'correct') {
+        osc.type = 'sine';
+        osc.frequency.setValueAtTime(523.25, ctx.currentTime); // C5
+        osc.frequency.exponentialRampToValueAtTime(659.25, ctx.currentTime + 0.15); // E5
+        osc.frequency.exponentialRampToValueAtTime(783.99, ctx.currentTime + 0.3); // G5
+        gain.gain.setValueAtTime(0.3, ctx.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.4);
+        osc.start();
+        osc.stop(ctx.currentTime + 0.4);
+      } else if (type === 'wrong') {
+        osc.type = 'sawtooth';
+        osc.frequency.setValueAtTime(220, ctx.currentTime);
+        osc.frequency.setValueAtTime(180, ctx.currentTime + 0.15);
+        gain.gain.setValueAtTime(0.3, ctx.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.35);
+        osc.start();
+        osc.stop(ctx.currentTime + 0.35);
+      } else if (type === 'click') {
+        osc.type = 'triangle';
+        osc.frequency.setValueAtTime(400, ctx.currentTime);
+        gain.gain.setValueAtTime(0.15, ctx.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.08);
+        osc.start();
+        osc.stop(ctx.currentTime + 0.08);
+      } else if (type === 'win') {
+        // Melodi kemenangan singkat
+        const notes = [440, 554.37, 659.25, 880];
+        notes.forEach((freq, idx) => {
+          const o = ctx.createOscillator();
+          const g = ctx.createGain();
+          o.type = 'sine';
+          o.frequency.setValueAtTime(freq, ctx.currentTime + idx * 0.12);
+          g.connect(ctx.destination);
+          o.connect(g);
+          g.gain.setValueAtTime(0.2, ctx.currentTime + idx * 0.12);
+          g.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + idx * 0.12 + 0.2);
+          o.start(ctx.currentTime + idx * 0.12);
+          o.stop(ctx.currentTime + idx * 0.12 + 0.2);
+        });
+      }
+    } catch (err) {
+      console.log("AudioContext fallback:", err);
+    }
+  };
+
+  // Text To Speech
+  const speakText = (text) => {
+    if (!ttsEnabled || !synthRef.current) return;
+    synthRef.current.cancel(); // Hentikan yang sedang jalan
+    const utterance = new SpeechSynthesisUtterance(text);
+    utterance.lang = 'id-ID'; // Bahasa Indonesia
+    utterance.rate = 0.9; // Kecepatan sedikit ramah anak
+    utterance.pitch = 1.1; // Nada bersahabat
+    synthRef.current.speak(utterance);
+  };
+
+  const stopSpeech = () => {
+    if (synthRef.current) {
+      synthRef.current.cancel();
+    }
+  };
+
+  // Auth & Cloud Sync
+  useEffect(() => {
+    const initAuth = async () => {
+      try {
+        if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
+          await signInWithCustomToken(auth, __initial_auth_token);
+        } else {
+          await signInAnonymously(auth);
+        }
+      } catch (err) {
+        console.error("Auth error:", err);
+      }
+    };
+    initAuth();
+    const unsub = onAuthStateChanged(auth, (u) => setUser(u));
+    return () => unsub();
+  }, []);
+
+  // Fetch Firestore Data untuk Dasbor Guru
+  useEffect(() => {
+    if (!user || gameState !== 'teacher_dashboard' || !isTeacherAuthed) return;
+    setLoadingDashboard(true);
+    
+    // Firestore Path Publik Sesuai Aturan Kritis
+    const resultsRef = collection(db, 'artifacts', appId, 'public', 'data', 'quiz_results');
+    
+    const unsubscribe = onSnapshot(resultsRef, 
+      (snapshot) => {
+        const data = [];
+        snapshot.forEach((doc) => {
+          data.push({ id: doc.id, ...doc.data() });
+        });
+        // Sort manual di memory sesuai Aturan 2 (Tanpa query orderBy)
+        data.sort((a, b) => (b.timestamp?.seconds || 0) - (a.timestamp?.seconds || 0));
+        setStudentResults(data);
+        setLoadingDashboard(false);
+      },
+      (error) => {
+        console.error("Firestore error:", error);
+        setLoadingDashboard(false);
+      }
+    );
+
+    return () => unsubscribe();
+  }, [user, gameState, isTeacherAuthed]);
+
+  // Baca soal otomatis jika TTS aktif & pindah soal
+  useEffect(() => {
+    if (gameState === 'playing') {
+      const q = QUESTION_BANK[currentQIndex];
+      const promptToRead = q.audioPrompt || q.question;
+      speakText(promptToRead);
+    } else {
+      stopSpeech();
+    }
+  }, [currentQIndex, gameState]);
+
+  // --- LOGIKA GAME ---
+  const handleStartGame = (e) => {
+    e.preventDefault();
+    if (!studentInfo.name.trim()) return;
+    playSfx('click');
+    setCurrentQIndex(0);
+    setScore(0);
+    setAnswersHistory([]);
+    setSelectedOption(null);
+    setUserShortAnswer('');
+    setShowFeedback(false);
+    setAdaptiveLevel(1);
+    setGameState('playing');
+  };
+
+  const handleAnswerSubmit = (givenAnswer) => {
+    playSfx('click');
+    const currentQ = QUESTION_BANK[currentQIndex];
+    let correct = false;
+
+    if (currentQ.type === 'short_text') {
+      const cleanInput = (givenAnswer || '').trim().toLowerCase();
+      correct = currentQ.answerKeywords.some(kw => cleanInput.includes(kw));
+    } else {
+      correct = (givenAnswer === currentQ.answer);
+    }
+
+    setIsCorrect(correct);
+    setShowFeedback(true);
+
+    if (correct) {
+      playSfx('correct');
+      const pointPerQ = 5; // 20 soal = total 100
+      setScore(prev => prev + pointPerQ);
+      speakText("Hore! Jawabanmu betul sekali. " + currentQ.explanation);
+      // Naikkan level adaptif
+      if (adaptiveLevel < 3) setAdaptiveLevel(prev => prev + 1);
+    } else {
+      playSfx('wrong');
+      const correctText = currentQ.type === 'short_text' ? currentQ.correctDisplay : currentQ.answer;
+      speakText("Aduh, kurang tepat. Jawaban yang benar adalah " + correctText + ". " + currentQ.explanation);
+    }
+
+    setAnswersHistory(prev => [
+      ...prev,
+      {
+        questionId: currentQ.id,
+        question: currentQ.question,
+        userAnswer: givenAnswer || '(Kosong)',
+        correctAnswer: currentQ.type === 'short_text' ? currentQ.correctDisplay : currentQ.answer,
+        isCorrect: correct
+      }
+    ]);
+  };
+
+  const handleNextQuestion = () => {
+    playSfx('click');
+    setShowFeedback(false);
+    setSelectedOption(null);
+    setUserShortAnswer('');
+
+    if (currentQIndex + 1 < QUESTION_BANK.length) {
+      setCurrentQIndex(prev => prev + 1);
+    } else {
+      // Selesai Kuis
+      finishQuiz();
+    }
+  };
+
+  const finishQuiz = async () => {
+    playSfx('win');
+    stopSpeech();
+    setGameState('result');
+
+    // Simpan ke Firestore Database Realtime
+    if (user) {
+      try {
+        const resultsRef = collection(db, 'artifacts', appId, 'public', 'data', 'quiz_results');
+        await addDoc(resultsRef, {
+          studentName: studentInfo.name,
+          studentClass: studentInfo.class,
+          score: score,
+          totalQuestions: QUESTION_BANK.length,
+          timestamp: serverTimestamp(),
+          dateString: new Date().toLocaleString('id-ID')
+        });
+      } catch (e) {
+        console.error("Gagal menyimpan nilai ke Firestore:", e);
+      }
+    }
+  };
+
+  // --- UNDUH LAPORAN (EXCEL, PDF, CSV) ---
+  const exportToCSV = () => {
+    if (studentResults.length === 0) return;
+    let csvContent = "data:text/csv;charset=utf-8,No,Nama Siswa,Kelas,Skor,Tanggal Selesai\n";
+    studentResults.forEach((row, i) => {
+      csvContent += `${i + 1},"${row.studentName}","${row.studentClass}",${row.score},"${row.dateString || ''}"\n`;
+    });
+    const encodedUri = encodeURI(csvContent);
+    const link = document.createElement("a");
+    link.setAttribute("href", encodedUri);
+    link.setAttribute("download", `Rekap_Nilai_IPAS_Kelas3_${new Date().toISOString().slice(0,10)}.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
+  const exportToTxtWord = () => {
+    if (studentResults.length === 0) return;
+    let content = "=== REKAP NILAI KUIS IPAS KELAS 3 SD ===\n";
+    content += "Materi: Perubahan Wujud Benda & Manfaatnya\n";
+    content += `Tanggal Unduh: ${new Date().toLocaleString('id-ID')}\n\n`;
+    content += "NO | NAMA SISWA | KELAS | SKOR | WAKTU PENGERJAAN\n";
+    content += "---------------------------------------------------------\n";
+    studentResults.forEach((row, i) => {
+      content += `${i + 1}. ${row.studentName} | Kelas: ${row.studentClass} | Nilai: ${row.score} | ${row.dateString || '-'}\n`;
+    });
+
+    const blob = new Blob([content], { type: 'application/msword;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `Rekap_Nilai_IPAS_Kelas3.doc`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const currentQ = QUESTION_BANK[currentQIndex];
+
+  return (
+    <div className="min-h-screen bg-gradient-to-b from-sky-200 via-teal-100 to-amber-100 font-sans text-slate-800 p-3 sm:p-6 flex flex-col items-center justify-start select-none">
+      
+      {/* BAR NAVIGASI ATAS & TOGGLE AUDIO */}
+      <header className="w-full max-w-4xl bg-white/80 backdrop-blur-md rounded-2xl p-4 shadow-lg mb-6 flex flex-wrap justify-between items-center gap-3 border-2 border-sky-300">
+        <div className="flex items-center gap-3">
+          <div className="bg-amber-400 p-2.5 rounded-xl shadow-md text-amber-900 animate-bounce">
+            <Sparkles className="w-6 h-6" />
+          </div>
+          <div>
+            <h1 className="font-extrabold text-lg sm:text-xl text-sky-900 leading-tight">
+              Petualangan Sains IPAS
+            </h1>
+            <p className="text-xs font-semibold text-sky-700">Kelas 3 SD • Perubahan Wujud Benda</p>
+          </div>
+        </div>
+
+        {/* Pengaturan Audio ON/OFF */}
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => setSoundEnabled(!soundEnabled)}
+            className={`p-2.5 rounded-xl text-xs font-bold flex items-center gap-1.5 transition-all shadow-sm ${
+              soundEnabled ? 'bg-emerald-500 text-white hover:bg-emerald-600' : 'bg-slate-300 text-slate-600'
+            }`}
+            title="Efek Suara"
+          >
+            {soundEnabled ? <Volume2 className="w-4 h-4" /> : <VolumeX className="w-4 h-4" />}
+            <span className="hidden sm:inline">Efek Suara</span>
+          </button>
+
+          <button
+            onClick={() => {
+              if (ttsEnabled) stopSpeech();
+              setTtsEnabled(!ttsEnabled);
+            }}
+            className={`p-2.5 rounded-xl text-xs font-bold flex items-center gap-1.5 transition-all shadow-sm ${
+              ttsEnabled ? 'bg-indigo-500 text-white hover:bg-indigo-600' : 'bg-slate-300 text-slate-600'
+            }`}
+            title="Suara Narasi (TTS)"
+          >
+            <Music className="w-4 h-4" />
+            <span className="hidden sm:inline">{ttsEnabled ? 'Narasi ON' : 'Narasi OFF'}</span>
+          </button>
+
+          <button
+            onClick={() => {
+              playSfx('click');
+              setGameState(gameState === 'teacher_dashboard' ? 'welcome' : 'teacher_dashboard');
+            }}
+            className="p-2.5 rounded-xl text-xs font-bold bg-amber-500 hover:bg-amber-600 text-white shadow-md flex items-center gap-1.5"
+          >
+            <Users className="w-4 h-4" />
+            <span>{gameState === 'teacher_dashboard' ? 'Kuis' : 'Guru'}</span>
+          </button>
+        </div>
+      </header>
+
+      {/* --- TIMELINE / HALAMAN 1: WELCOME & INPUT IDENTITAS --- */}
+      {gameState === 'welcome' && (
+        <main className="w-full max-w-xl bg-white rounded-3xl p-6 sm:p-8 shadow-2xl border-4 border-sky-300 transition-all transform animate-fade-in">
+          <div className="text-center mb-6">
+            <div className="inline-block p-4 bg-sky-100 rounded-full mb-3 text-sky-600 ring-4 ring-sky-200">
+              <BookOpen className="w-12 h-12" />
+            </div>
+            <h2 className="text-2xl sm:text-3xl font-black text-sky-900 mb-2">
+              Halo Ilmuwan Cilik! 👋
+            </h2>
+            <p className="text-sm text-slate-600 font-medium">
+              Ayo uji pengetahuanmu tentang mencair, membeku, menguap, mengembun & menyublim!
+            </p>
+          </div>
+
+          <form onSubmit={handleStartGame} className="space-y-4">
+            <div>
+              <label className="block text-xs font-extrabold text-slate-700 uppercase tracking-wider mb-2">
+                Nama Lengkap Siswa:
+              </label>
+              <input
+                type="text"
+                required
+                placeholder="Ketik namamu di sini..."
+                value={studentInfo.name}
+                onChange={(e) => setStudentInfo({ ...studentInfo, name: e.target.value })}
+                className="w-full px-4 py-3 rounded-2xl border-2 border-sky-300 focus:border-sky-500 focus:ring-4 focus:ring-sky-100 outline-none text-base font-semibold text-slate-800 transition"
+              />
+            </div>
+
+            <div>
+              <label className="block text-xs font-extrabold text-slate-700 uppercase tracking-wider mb-2">
+                Kelas:
+              </label>
+              <select
+                value={studentInfo.class}
+                onChange={(e) => setStudentInfo({ ...studentInfo, class: e.target.value })}
+                className="w-full px-4 py-3 rounded-2xl border-2 border-sky-300 focus:border-sky-500 focus:ring-4 focus:ring-sky-100 outline-none text-base font-semibold text-slate-800 transition bg-white"
+              >
+                <option value="3A">Kelas 3-A</option>
+                <option value="3B">Kelas 3-B</option>
+                <option value="3C">Kelas 3-C</option>
+                <option value="3D">Kelas 3-D</option>
+              </select>
+            </div>
+
+            <div className="bg-amber-50 border-2 border-amber-200 rounded-2xl p-4 flex items-start gap-3">
+              <Lightbulb className="w-6 h-6 text-amber-600 shrink-0 mt-0.5" />
+              <div className="text-xs text-amber-900">
+                <p className="font-bold mb-1">Informasi Kuis:</p>
+                <ul className="list-disc list-inside space-y-1 text-slate-700">
+                  <li>Total 20 Soal Pilihan Ganda & Isian Singkat.</li>
+                  <li>Soal dibacakan otomatis oleh suara pembaca.</li>
+                  <li>Tingkat kesulitan menyesuaikan jawabanmu!</li>
+                </ul>
+              </div>
+            </div>
+
+            <button
+              type="submit"
+              className="w-full py-4 bg-gradient-to-r from-emerald-400 to-teal-500 hover:from-emerald-500 hover:to-teal-600 text-white font-extrabold text-lg rounded-2xl shadow-xl hover:shadow-2xl transition transform hover:-translate-y-0.5 flex items-center justify-center gap-2"
+            >
+              <Play className="w-6 h-6 fill-current" />
+              Mulai Petualangan!
+            </button>
+          </form>
+        </main>
+      )}
+
+      {/* --- TIMELINE / HALAMAN 2: ARENA KUIS INTERAKTIF --- */}
+      {gameState === 'playing' && currentQ && (
+        <main className="w-full max-w-2xl bg-white rounded-3xl p-5 sm:p-7 shadow-2xl border-4 border-sky-300 flex flex-col gap-5">
+          
+          {/* Header Progress Kuis */}
+          <div className="flex flex-wrap justify-between items-center gap-2 pb-3 border-b-2 border-slate-100">
+            <div className="flex items-center gap-2">
+              <span className="px-3 py-1 bg-sky-100 text-sky-800 font-extrabold text-xs rounded-full">
+                Soal {currentQIndex + 1} / {QUESTION_BANK.length}
+              </span>
+              <span className="px-3 py-1 bg-amber-100 text-amber-800 font-extrabold text-xs rounded-full flex items-center gap-1">
+                Level: {adaptiveLevel === 1 ? '🟢 Mudah' : adaptiveLevel === 2 ? '🟡 Sedang' : '🔴 Menantang'}
+              </span>
+            </div>
+
+            <div className="flex items-center gap-1 text-emerald-600 font-black text-sm">
+              <Trophy className="w-5 h-5 text-amber-500" />
+              <span>Skor: {score}</span>
+            </div>
+          </div>
+
+          {/* Progress Bar */}
+          <div className="w-full bg-slate-100 h-3 rounded-full overflow-hidden">
+            <div
+              className="bg-gradient-to-r from-sky-400 to-emerald-400 h-full transition-all duration-300"
+              style={{ width: `${((currentQIndex + 1) / QUESTION_BANK.length) * 100}%` }}
+            ></div>
+          </div>
+
+          {/* Tipe Soal & Tombol Putar Ulang Suara */}
+          <div className="bg-sky-50 rounded-2xl p-4 border-2 border-sky-200 relative">
+            <div className="flex justify-between items-center mb-2">
+              <span className="text-xs font-bold text-sky-700 uppercase tracking-wider flex items-center gap-1">
+                {currentQ.type === 'audio_choice' ? '🎧 Dengarkan Lalu Jawab' : '📖 Pertanyaan'}
+              </span>
+
+              <button
+                onClick={() => speakText(currentQ.audioPrompt || currentQ.question)}
+                className="px-3 py-1 bg-white border border-sky-300 hover:bg-sky-100 text-sky-800 text-xs font-bold rounded-xl flex items-center gap-1 shadow-sm transition"
+              >
+                <Volume2 className="w-4 h-4 text-sky-600" /> Putar Suara Soal
+              </button>
+            </div>
+
+            <p className="text-base sm:text-lg font-bold text-slate-800 leading-relaxed">
+              {currentQ.question}
+            </p>
+          </div>
+
+          {/* AREA INPUT JAWABAN */}
+          {!showFeedback && (
+            <div className="space-y-3">
+              {currentQ.type === 'short_text' ? (
+                <div className="space-y-3">
+                  <input
+                    type="text"
+                    placeholder="Ketik jawabanmu di sini..."
+                    value={userShortAnswer}
+                    onChange={(e) => setUserShortAnswer(e.target.value)}
+                    onKeyDown={(e) => e.key === 'Enter' && userShortAnswer.trim() && handleAnswerSubmit(userShortAnswer)}
+                    className="w-full p-4 border-2 border-teal-300 rounded-2xl focus:border-teal-500 outline-none text-base font-bold text-slate-800 shadow-inner"
+                  />
+                  <button
+                    onClick={() => handleAnswerSubmit(userShortAnswer)}
+                    disabled={!userShortAnswer.trim()}
+                    className="w-full py-3.5 bg-teal-500 hover:bg-teal-600 disabled:bg-slate-300 text-white font-extrabold text-base rounded-2xl shadow-md transition"
+                  >
+                    Kirim Jawaban
+                  </button>
+                </div>
+              ) : (
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  {currentQ.options.map((opt, idx) => (
+                    <button
+                      key={idx}
+                      onClick={() => handleAnswerSubmit(opt)}
+                      className="p-4 text-left bg-white border-2 border-slate-200 hover:border-sky-400 hover:bg-sky-50/50 rounded-2xl font-bold text-slate-700 transition duration-150 shadow-sm flex items-start gap-3 active:scale-95"
+                    >
+                      <span className="w-7 h-7 bg-sky-100 text-sky-800 font-extrabold text-xs rounded-xl flex items-center justify-center shrink-0">
+                        {String.fromCharCode(65 + idx)}
+                      </span>
+                      <span className="text-sm sm:text-base leading-snug">{opt}</span>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* UMPAN BALIK EDUKATIF (FEEDBACK) */}
+          {showFeedback && (
+            <div className={`p-5 rounded-2xl border-2 animate-fade-in ${
+              isCorrect ? 'bg-emerald-50 border-emerald-300 text-emerald-900' : 'bg-rose-50 border-rose-300 text-rose-900'
+            }`}>
+              <div className="flex items-center gap-3 mb-2">
+                {isCorrect ? (
+                  <CheckCircle2 className="w-8 h-8 text-emerald-600 shrink-0" />
+                ) : (
+                  <XCircle className="w-8 h-8 text-rose-600 shrink-0" />
+                )}
+                <div>
+                  <h3 className="font-extrabold text-lg">
+                    {isCorrect ? 'Hebat Sekali! Jawabanmu Benar 🎉' : 'Aduh, Belum Tepat 😊'}
+                  </h3>
+                  {!isCorrect && (
+                    <p className="text-xs font-bold text-rose-700 mt-0.5">
+                      Jawaban Benar: <span className="underline">{currentQ.type === 'short_text' ? currentQ.correctDisplay : currentQ.answer}</span>
+                    </p>
+                  )}
+                </div>
+              </div>
+
+              {/* Penjelasan Ilmiah Edukatif */}
+              <div className="bg-white/80 p-3 rounded-xl border border-slate-200 text-xs sm:text-sm text-slate-700 mt-2 font-medium">
+                <p className="font-bold text-slate-900 mb-1 flex items-center gap-1">
+                  <Lightbulb className="w-4 h-4 text-amber-500" /> Penjelasan:
+                </p>
+                {currentQ.explanation}
+              </div>
+
+              <button
+                onClick={handleNextQuestion}
+                className="mt-4 w-full py-3.5 bg-sky-600 hover:bg-sky-700 text-white font-black text-base rounded-2xl shadow-lg flex items-center justify-center gap-2 transition"
+              >
+                <span>{currentQIndex + 1 === QUESTION_BANK.length ? 'Lihat Hasil Akhir' : 'Lanjut ke Soal Berikutnya'}</span>
+                <ChevronRight className="w-5 h-5" />
+              </button>
+            </div>
+          )}
+
+        </main>
+      )}
+
+      {/* --- TIMELINE / HALAMAN 3: HASIL AKHIR & RAPOR SISWA --- */}
+      {gameState === 'result' && (
+        <main className="w-full max-w-xl bg-white rounded-3xl p-6 sm:p-8 shadow-2xl border-4 border-amber-300 text-center animate-fade-in space-y-6">
+          <div className="inline-block p-4 bg-amber-100 rounded-full text-amber-600 ring-8 ring-amber-50 animate-bounce">
+            <Award className="w-16 h-16" />
+          </div>
+
+          <div>
+            <h2 className="text-3xl font-black text-slate-800">Petualangan Selesai!</h2>
+            <p className="text-sm font-semibold text-slate-500 mt-1">
+              Selamat <span className="text-sky-700 font-bold">{studentInfo.name}</span> ({studentInfo.class})
+            </p>
+          </div>
+
+          {/* Kotak Skor Big Badge */}
+          <div className="bg-gradient-to-r from-amber-400 to-orange-400 p-6 rounded-3xl text-white shadow-xl">
+            <p className="text-xs font-bold uppercase tracking-widest text-amber-100">Total Skor Kamu</p>
+            <div className="text-6xl font-black my-1">{score}</div>
+            <p className="text-xs font-semibold">
+              {score >= 80 ? '🌟 Sangat Luar Biasa! Kamu Pakar Sains!' : score >= 60 ? '👍 Bagus Sekali! Tingkatkan Lagi Ya!' : '💪 Tetap Semangat! Ayo Belajar Lagi!'}
+            </p>
+          </div>
+
+          {/* Ringkasan Jawaban */}
+          <div className="text-left bg-slate-50 p-4 rounded-2xl border border-slate-200 max-h-48 overflow-y-auto space-y-2">
+            <p className="text-xs font-bold text-slate-600 mb-2">Ringkasan Jawaban Soal:</p>
+            {answersHistory.map((item, idx) => (
+              <div key={idx} className="flex items-center justify-between text-xs p-2 bg-white rounded-xl border border-slate-100">
+                <span className="font-semibold text-slate-700 truncate max-w-[200px]">
+                  {idx + 1}. {item.question}
+                </span>
+                <span className={`px-2 py-0.5 rounded-md font-bold text-[10px] ${
+                  item.isCorrect ? 'bg-emerald-100 text-emerald-800' : 'bg-rose-100 text-rose-800'
+                }`}>
+                  {item.isCorrect ? 'Benar' : 'Salah'}
+                </span>
+              </div>
+            ))}
+          </div>
+
+          <div className="flex gap-3">
+            <button
+              onClick={() => {
+                playSfx('click');
+                setGameState('welcome');
+              }}
+              className="flex-1 py-3.5 bg-slate-200 hover:bg-slate-300 text-slate-800 font-bold text-sm rounded-2xl transition flex items-center justify-center gap-2"
+            >
+              <RefreshCw className="w-4 h-4" /> Main Lagi
+            </button>
+            <button
+              onClick={() => {
+                playSfx('click');
+                setGameState('teacher_dashboard');
+              }}
+              className="flex-1 py-3.5 bg-sky-600 hover:bg-sky-700 text-white font-bold text-sm rounded-2xl shadow-lg transition flex items-center justify-center gap-2"
+            >
+              <Users className="w-4 h-4" /> Lihat Dasbor Guru
+            </button>
+          </div>
+        </main>
+      )}
+
+      {/* --- TIMELINE / HALAMAN 4: DASBOR GURU REAL-TIME --- */}
+      {gameState === 'teacher_dashboard' && (
+        <main className="w-full max-w-4xl bg-white rounded-3xl p-6 sm:p-8 shadow-2xl border-4 border-indigo-200 space-y-6">
+          
+          <div className="flex flex-wrap justify-between items-center gap-4 pb-4 border-b border-slate-200">
+            <div>
+              <h2 className="text-2xl font-black text-indigo-950 flex items-center gap-2">
+                <Users className="w-7 h-7 text-indigo-600" /> Dasbor Guru & Rekap Nilai Real-Time
+              </h2>
+              <p className="text-xs text-slate-500 font-medium mt-1">
+                Pantau nilai kuis IPAS siswa secara serentak dari cloud database.
+              </p>
+            </div>
+
+            <button
+              onClick={() => setGameState('welcome')}
+              className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs rounded-xl flex items-center gap-1.5 transition"
+            >
+              <ArrowLeft className="w-4 h-4" /> Kembali ke Kuis
+            </button>
+          </div>
+
+          {/* KONTROL OTENTIKASI SEDERHANA GURU */}
+          {!isTeacherAuthed ? (
+            <div className="max-w-md mx-auto bg-indigo-50 p-6 rounded-3xl border-2 border-indigo-200 text-center space-y-4">
+              <div className="p-3 bg-indigo-100 text-indigo-600 rounded-full inline-block">
+                <HelpCircle className="w-8 h-8" />
+              </div>
+              <h3 className="font-extrabold text-indigo-900 text-lg">Akses Dasbor Guru</h3>
+              <p className="text-xs text-slate-600">
+                Masukkan Kata Kunci Akses Guru (Default/Demo: <span className="font-bold text-indigo-700">guru123</span>)
+              </p>
+              <form onSubmit={(e) => {
+                e.preventDefault();
+                if (teacherPass === 'guru123' || teacherPass === 'admin') {
+                  setIsTeacherAuthed(true);
+                } else {
+                  alert("Kata kunci salah! Gunakan: guru123");
+                }
+              }} className="space-y-3">
+                <input
+                  type="password"
+                  placeholder="Ketik sandi guru..."
+                  value={teacherPass}
+                  onChange={(e) => setTeacherPass(e.target.value)}
+                  className="w-full px-4 py-3 rounded-2xl border-2 border-indigo-300 outline-none font-bold text-center"
+                />
+                <button
+                  type="submit"
+                  className="w-full py-3 bg-indigo-600 hover:bg-indigo-700 text-white font-extrabold rounded-2xl shadow-md transition"
+                >
+                  Buka Dasbor
+                </button>
+              </form>
+            </div>
+          ) : (
+            <>
+              {/* TOMBOL UNDUH LAPORAN (EXCEL/CSV & WORD/DOC) */}
+              <div className="flex flex-wrap items-center justify-between gap-3 bg-slate-50 p-4 rounded-2xl border border-slate-200">
+                <div className="text-xs font-bold text-slate-700">
+                  Total Siswa Mengerjakan: <span className="text-indigo-600 font-extrabold text-sm">{studentResults.length}</span>
+                </div>
+
+                <div className="flex flex-wrap gap-2">
+                  <button
+                    onClick={exportToCSV}
+                    className="px-3.5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs rounded-xl shadow-md flex items-center gap-1.5 transition"
+                  >
+                    <Download className="w-4 h-4" /> Unduh Excel / CSV
+                  </button>
+
+                  <button
+                    onClick={exportToTxtWord}
+                    className="px-3.5 py-2 bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs rounded-xl shadow-md flex items-center gap-1.5 transition"
+                  >
+                    <Download className="w-4 h-4" /> Unduh Dokumen Word (.doc)
+                  </button>
+                </div>
+              </div>
+
+              {/* TABEL REKAP NILAI REALTIME */}
+              <div className="overflow-x-auto border-2 border-slate-200 rounded-2xl">
+                {loadingDashboard ? (
+                  <div className="p-8 text-center text-slate-500 font-semibold">
+                    Mengambil data terbaru dari Cloud...
+                  </div>
+                ) : studentResults.length === 0 ? (
+                  <div className="p-8 text-center text-slate-500 font-semibold">
+                    Belum ada data nilai kuis yang tersimpan. Silakan kerjakan kuis terlebih dahulu!
+                  </div>
+                ) : (
+                  <table className="w-full text-left text-sm">
+                    <thead className="bg-indigo-50 text-indigo-950 font-black border-b border-indigo-100 text-xs uppercase">
+                      <tr>
+                        <th className="p-3.5">No</th>
+                        <th className="p-3.5">Nama Siswa</th>
+                        <th className="p-3.5">Kelas</th>
+                        <th className="p-3.5">Skor (0-100)</th>
+                        <th className="p-3.5">Waktu Selesai</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100 font-medium text-slate-700">
+                      {studentResults.map((res, index) => (
+                        <tr key={res.id || index} className="hover:bg-indigo-50/40 transition">
+                          <td className="p-3.5 font-bold text-slate-400">{index + 1}</td>
+                          <td className="p-3.5 font-bold text-slate-900">{res.studentName}</td>
+                          <td className="p-3.5">
+                            <span className="px-2.5 py-1 bg-slate-100 text-slate-700 font-bold text-xs rounded-lg">
+                              {res.studentClass}
+                            </span>
+                          </td>
+                          <td className="p-3.5">
+                            <span className={`px-3 py-1 rounded-full font-extrabold text-xs ${
+                              res.score >= 80 ? 'bg-emerald-100 text-emerald-800' :
+                              res.score >= 60 ? 'bg-amber-100 text-amber-800' : 'bg-rose-100 text-rose-800'
+                            }`}>
+                              {res.score}
+                            </span>
+                          </td>
+                          <td className="p-3.5 text-xs text-slate-500">{res.dateString || 'Baru Saja'}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                )}
+              </div>
+            </>
+          )}
+
+        </main>
+      )}
+
+      {/* FOOTER */}
+      <footer className="mt-8 text-center text-xs font-semibold text-slate-600">
+        Kuis Interaktif IPAS Kelas 3 SD • Kurikulum Merdeka • Materi Perubahan Wujud Benda
+      </footer>
+    </div>
+  );
+}
